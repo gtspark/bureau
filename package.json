@@ -1,0 +1,20 @@
+{
+  "name": "bureau-ide",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Self-hosted web-based IDE with Claude OAuth authentication",
+  "license": "MIT",
+  "scripts": {
+    "dev": "concurrently -n server,web -c blue,green \"pnpm --filter @bureau-ide/server dev\" \"pnpm --filter @bureau-ide/web dev\"",
+    "build": "pnpm --filter @bureau-ide/server build && pnpm --filter @bureau-ide/web build",
+    "server": "pnpm --filter @bureau-ide/server dev",
+    "web": "pnpm --filter @bureau-ide/web dev"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

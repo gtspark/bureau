@@ -1,0 +1,17 @@
+[Unit]
+Description=Bureau IDE Server
+After=network.target
+
+[Service]
+Type=simple
+User=admin
+WorkingDirectory=/var/www/html/ide
+Environment=PATH=/usr/bin:/home/admin/.npm-global/bin
+Environment=PORT=3006
+Environment=PROJECT_ROOT=/var/www/html/ide
+ExecStart=/home/admin/.npm-global/bin/pnpm --filter @bureau-ide/server start
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
