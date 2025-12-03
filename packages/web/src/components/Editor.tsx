@@ -197,10 +197,12 @@ export function Editor({ files, activeIndex, onTabClick, onContentChange, onClos
         range: new monaco.Range(line, 1, line, 1),
         options: {
           isWholeLine: true,
+          className: 'git-line-added',
           linesDecorationsClassName: 'git-diff-added',
+          marginClassName: 'git-margin-added',
           overviewRuler: {
             color: '#22c55e',
-            position: monaco.editor.OverviewRulerLane.Left,
+            position: monaco.editor.OverviewRulerLane.Full,
           },
         },
       })
@@ -211,11 +213,13 @@ export function Editor({ files, activeIndex, onTabClick, onContentChange, onClos
       decorations.push({
         range: new monaco.Range(line, 1, line, 1),
         options: {
-          isWholeLine: false,
+          isWholeLine: true,
+          className: 'git-line-deleted',
           linesDecorationsClassName: 'git-diff-deleted',
+          marginClassName: 'git-margin-deleted',
           overviewRuler: {
             color: '#ef4444',
-            position: monaco.editor.OverviewRulerLane.Left,
+            position: monaco.editor.OverviewRulerLane.Full,
           },
         },
       })

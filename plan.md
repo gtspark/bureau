@@ -150,7 +150,7 @@
 - [x] Use Monaco's `deltaDecorations` API for line markers
 - [ ] Consider: full diff editor mode for reviewing changes
 - **Why**: When Claude edits files, user needs to see what changed at a glance
-- **Tested**: Dec 2025
+- **Tested**: Dec 2025 - SHOULD BE GREEN NOW!
 
 ### Other Editor Features
 - [ ] Split view (horizontal/vertical)

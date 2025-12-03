@@ -124,19 +124,20 @@ export class GitOperations {
         return { added: [], modified: [], deleted: [] };
       }
 
-      const added: number[] = [];
-      const modified: number[] = [];
-      const deleted: number[] = [];
+      const addedSet = new Set<number>();
+      const deletedSet = new Set<number>();
 
       // Parse unified diff format
       const lines = result.split('\n');
       let currentLine = 0;
+      let pendingDeletes = 0; // Track consecutive deletes to pair with adds
 
       for (const line of lines) {
         // Match hunk header: @@ -oldStart,oldCount +newStart,newCount @@
         const hunkMatch = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
         if (hunkMatch) {
           currentLine = parseInt(hunkMatch[1], 10);
+          pendingDeletes = 0;
           continue;
         }
 
@@ -146,23 +147,40 @@ export class GitOperations {
           continue;
         }
 
+        // Deleted line - track it but don't advance line number
+        if (line.startsWith('-')) {
+          pendingDeletes++;
+        }
         // Added line
-        if (line.startsWith('+')) {
-          added.push(currentLine);
+        else if (line.startsWith('+')) {
+          // This is a new/modified line in the current file
+          addedSet.add(currentLine);
+          if (pendingDeletes > 0) {
+            pendingDeletes--;
+          }
           currentLine++;
         }
-        // Deleted line (don't increment currentLine as it doesn't exist in new file)
-        else if (line.startsWith('-')) {
-          // Mark the current position as having a deletion
-          deleted.push(currentLine);
-        }
         // Context line
-        else if (line.startsWith(' ') || line === '') {
+        else if (line.startsWith(' ')) {
+          // If we had pending deletes without matching adds, mark deletion point
+          if (pendingDeletes > 0) {
+            deletedSet.add(currentLine);
+            pendingDeletes = 0;
+          }
           currentLine++;
         }
       }
 
-      return { added, modified, deleted };
+      // Handle trailing deletes at end of hunk
+      if (pendingDeletes > 0) {
+        deletedSet.add(currentLine);
+      }
+
+      return {
+        added: Array.from(addedSet),
+        modified: [],
+        deleted: Array.from(deletedSet),
+      };
     } catch {
       return { added: [], modified: [], deleted: [] };
     }
