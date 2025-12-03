@@ -35,6 +35,7 @@ export function GitStatus() {
   const [stagedOpen, setStagedOpen] = useState(true)
   const [changesOpen, setChangesOpen] = useState(true)
   const [untrackedOpen, setUntrackedOpen] = useState(true)
+  const [justCommitted, setJustCommitted] = useState(false)
 
   // Request git status
   const refreshStatus = useCallback(() => {
@@ -105,11 +106,13 @@ export function GitStatus() {
         setStatus(msg.status as GitStatusData)
         setCommitMessage('')
         setIsCommitting(false)
+        setJustCommitted(true)
         break
 
       case 'git:pushed':
         setStatus(msg.status as GitStatusData)
         setIsPushing(false)
+        setJustCommitted(false)
         break
 
       case 'git:pulled':
@@ -380,6 +383,34 @@ export function GitStatus() {
               <>
                 <Check size={14} />
                 Commit {status.staged.length} file{status.staged.length === 1 ? '' : 's'}
+              </>
+            )}
+          </button>
+        </div>
+      )}
+
+      {/* Push section - shows after commit or when ahead */}
+      {status.staged.length === 0 && (justCommitted || status.ahead > 0) && (
+        <div className="p-3 border-t border-white/5 bg-zinc-900/30">
+          <button
+            onClick={push}
+            disabled={isPushing}
+            className={cn(
+              "w-full py-2 px-3 rounded-lg text-sm font-medium transition-all flex items-center justify-center gap-2",
+              isPushing
+                ? "bg-zinc-800 text-zinc-500 cursor-not-allowed"
+                : "bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-500/20"
+            )}
+          >
+            {isPushing ? (
+              <>
+                <Loader2 size={14} className="animate-spin" />
+                Pushing...
+              </>
+            ) : (
+              <>
+                <ArrowUp size={14} />
+                Push {status.ahead > 0 ? `${status.ahead} commit${status.ahead === 1 ? '' : 's'}` : 'to remote'}
               </>
             )}
           </button>
