@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useWebSocket, useWebSocketMessages } from '../contexts/WebSocketContext'
+import { useToast } from '../contexts/ToastContext'
 import { Plus, Minus, Check, RefreshCw, AlertCircle, Loader2, ChevronDown, ChevronRight, ArrowUp, ArrowDown } from 'lucide-react'
 import { cn } from '../lib/cn'
 
@@ -26,6 +27,7 @@ function FileStatusIcon({ type }: { type: 'staged' | 'unstaged' | 'untracked' })
 
 export function GitStatus() {
   const { connected, send } = useWebSocket()
+  const toast = useToast()
   const [status, setStatus] = useState<GitStatusData | null>(null)
   const [commitMessage, setCommitMessage] = useState('')
   const [isCommitting, setIsCommitting] = useState(false)
@@ -107,17 +109,20 @@ export function GitStatus() {
         setCommitMessage('')
         setIsCommitting(false)
         setJustCommitted(true)
+        toast.success('Changes committed successfully')
         break
 
       case 'git:pushed':
         setStatus(msg.status as GitStatusData)
         setIsPushing(false)
         setJustCommitted(false)
+        toast.success('Pushed to remote')
         break
 
       case 'git:pulled':
         setStatus(msg.status as GitStatusData)
         setIsPulling(false)
+        toast.success('Pulled from remote')
         break
 
       case 'file:changed':
@@ -133,14 +138,16 @@ export function GitStatus() {
 
       case 'error':
         if ((msg.originalType as string)?.startsWith('git:')) {
-          setError(msg.message as string)
+          const errorMsg = msg.message as string
+          setError(errorMsg)
+          toast.error(errorMsg)
           setIsCommitting(false)
           setIsPushing(false)
           setIsPulling(false)
         }
         break
     }
-  }, [refreshStatus])
+  }, [refreshStatus, toast])
 
   if (!connected) {
     return (

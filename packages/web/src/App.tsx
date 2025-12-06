@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { WebSocketProvider, useWebSocket, useWebSocketMessages } from './contexts/WebSocketContext'
 import { SessionProvider, useSession } from './contexts/SessionContext'
+import { ToastProvider, useToast } from './contexts/ToastContext'
 import { Layout } from './components/Layout'
 import { Chat } from './components/Chat'
 import { FileTree } from './components/FileTree'
@@ -13,6 +14,7 @@ interface OpenFile {
   path: string
   content: string
   isDirty?: boolean
+  originalContent?: string  // Clean content from disk (for diff computation)
 }
 
 function AppContent() {
@@ -22,8 +24,21 @@ function AppContent() {
   const [restoredSessionId, setRestoredSessionId] = useState<string | null>(null)
   const { connected, claudeRunning, claudeCwd, lastExplorerPath, projectRoot, send } = useWebSocket()
   const { activeSession } = useSession()
+  const toast = useToast()
   const terminalRef = useRef<TerminalRef>(null)
   const draftTimeoutRef = useRef<Record<string, number>>({})
+
+  // Handle global errors via toast (except git errors which are handled in GitStatus)
+  useWebSocketMessages((msg) => {
+    if (msg.type === 'error') {
+      const originalType = msg.originalType as string | undefined
+      // Skip git errors (handled in GitStatus) and file:save errors (handled in Editor)
+      if (originalType?.startsWith('git:') || originalType === 'file:save') return
+      toast.error(msg.message as string)
+    } else if (msg.type === 'claude:error') {
+      toast.error(`Claude error: ${msg.message}`)
+    }
+  }, [toast])
 
   // Track previous projectRoot to detect session changes
   const prevProjectRootRef = useRef<string | null>(null)
@@ -204,7 +219,8 @@ function AppContent() {
       const isDirty = !!draft
       const fileContent = draft ? draft.content : content
       // Add new file and make it active
-      const newFiles = [...prev, { path, content: fileContent, isDirty }]
+      // Store original (disk) content for diff computation
+      const newFiles = [...prev, { path, content: fileContent, isDirty, originalContent: content }]
       setActiveFileIndex(newFiles.length - 1)
       return newFiles
     })
@@ -246,6 +262,15 @@ function AppContent() {
     setActiveFileIndex(index)
   }, [])
 
+  // Handle file save - clear dirty state and draft
+  const handleFileSave = useCallback((path: string) => {
+    setOpenFiles(prev => prev.map(f =>
+      f.path === path ? { ...f, isDirty: false, originalContent: f.content } : f
+    ))
+    // Clear draft on server
+    send({ type: 'editor:draft:clear', path })
+  }, [send])
+
   // Handle file drop - request file content to open it
   const handleFileDrop = useCallback((path: string) => {
     // Check if already open
@@ -283,6 +308,13 @@ function AppContent() {
     send({ type: 'explorer:setcwd', path })
   }, [send, projectRoot])
 
+  // Refresh file tree - just re-request current path
+  const handleRefresh = useCallback(() => {
+    if (explorerBasePath) {
+      send({ type: 'files:list', path: explorerBasePath })
+    }
+  }, [explorerBasePath, send])
+
   // File tree for sidebar (use '.' as default until session loads)
   const fileTree = <FileTree onFileSelect={handleFileSelect} onFolderNavigate={handleExplorerPathChange} basePath={explorerBasePath || '.'} />
 
@@ -299,6 +331,7 @@ function AppContent() {
       projectRoot={projectRoot || '.'}
       onExplorerSync={handleExplorerSync}
       onPathChange={handleExplorerPathChange}
+      onRefresh={handleRefresh}
     />
   )
 
@@ -311,6 +344,7 @@ function AppContent() {
       onContentChange={handleContentChange}
       onClose={handleCloseFile}
       onFileDrop={handleFileDrop}
+      onSave={handleFileSave}
     />
   )
 
@@ -344,7 +378,9 @@ function App() {
   return (
     <WebSocketProvider>
       <SessionProvider>
-        <AppContent />
+        <ToastProvider>
+          <AppContent />
+        </ToastProvider>
       </SessionProvider>
     </WebSocketProvider>
   )

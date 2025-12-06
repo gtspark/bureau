@@ -1,4 +1,4 @@
-import { spawn, ChildProcess } from 'child_process';
+import { spawn, ChildProcess, execSync } from 'child_process';
 import { EventEmitter } from 'events';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -6,6 +6,113 @@ import * as crypto from 'crypto';
 import { BUREAU_SYSTEM_PROMPT, BUREAU_CONTEXT_REFRESH } from '../config/prompts.js';
 
 const BUREAU_DIR = path.join(process.env.HOME || '/tmp', '.bureau');
+
+// Claude CLI status
+export interface ClaudeCliStatus {
+  installed: boolean;
+  authenticated: boolean;
+  version?: string;
+  error?: string;
+}
+
+// Check if Claude CLI is installed and authenticated
+export function checkClaudeCliStatus(): ClaudeCliStatus {
+  try {
+    // Check if claude command exists
+    const versionOutput = execSync('claude --version 2>&1', {
+      encoding: 'utf-8',
+      timeout: 5000
+    }).trim();
+
+    // Parse version (e.g., "claude 1.0.3 (claude-code)")
+    const versionMatch = versionOutput.match(/claude\s+([\d.]+)/i);
+    const version = versionMatch ? versionMatch[1] : undefined;
+
+    // Check authentication by running a simple command
+    // We use `claude --help` which should work even without auth,
+    // but we can detect auth issues from error messages
+    try {
+      // Run a quick non-interactive check - /doctor gives auth status
+      const doctorOutput = execSync('claude /doctor 2>&1', {
+        encoding: 'utf-8',
+        timeout: 10000
+      });
+
+      // Check for authentication issues in the output
+      if (doctorOutput.includes('not logged in') ||
+          doctorOutput.includes('not authenticated') ||
+          doctorOutput.includes('Please log in') ||
+          doctorOutput.includes('Authentication required')) {
+        return {
+          installed: true,
+          authenticated: false,
+          version,
+          error: 'Claude CLI is not authenticated. Run "claude" in a terminal to log in.'
+        };
+      }
+
+      return {
+        installed: true,
+        authenticated: true,
+        version
+      };
+    } catch (authError) {
+      // If /doctor fails, check the error message
+      const errorMsg = authError instanceof Error ? authError.message : String(authError);
+      if (errorMsg.includes('not logged in') ||
+          errorMsg.includes('not authenticated') ||
+          errorMsg.includes('Please log in') ||
+          errorMsg.includes('Authentication')) {
+        return {
+          installed: true,
+          authenticated: false,
+          version,
+          error: 'Claude CLI is not authenticated. Run "claude" in a terminal to log in.'
+        };
+      }
+      // Assume authenticated if no explicit auth error
+      return {
+        installed: true,
+        authenticated: true,
+        version
+      };
+    }
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+
+    // Check for "command not found" type errors
+    if (errorMsg.includes('not found') ||
+        errorMsg.includes('ENOENT') ||
+        errorMsg.includes('not recognized')) {
+      return {
+        installed: false,
+        authenticated: false,
+        error: 'Claude CLI is not installed. Install it with: npm install -g @anthropic-ai/claude-code'
+      };
+    }
+
+    return {
+      installed: false,
+      authenticated: false,
+      error: `Failed to check Claude CLI: ${errorMsg}`
+    };
+  }
+}
+
+// Cached status (checked once at startup)
+let cachedCliStatus: ClaudeCliStatus | null = null;
+
+export function getCachedClaudeCliStatus(): ClaudeCliStatus {
+  if (!cachedCliStatus) {
+    cachedCliStatus = checkClaudeCliStatus();
+  }
+  return cachedCliStatus;
+}
+
+export function refreshClaudeCliStatus(): ClaudeCliStatus {
+  cachedCliStatus = checkClaudeCliStatus();
+  return cachedCliStatus;
+}
 const SESSION_MAP_FILE = path.join(BUREAU_DIR, 'session-map.json');
 const INITIALIZED_SESSIONS_FILE = path.join(BUREAU_DIR, 'initialized-sessions.json');
 

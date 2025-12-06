@@ -90,39 +90,64 @@ body {
   background-color: #09090b !important;
 }
 
-/* Monaco git diff gutter decorations */
-.git-diff-added {
+/* Monaco diff gutter decorations - VS Code style */
+.diff-gutter-added {
   background-color: #22c55e !important;
-  width: 4px !important;
-  margin-left: 2px !important;
+  width: 3px !important;
+  margin-left: 3px !important;
+  border-radius: 1px !important;
 }
 
-.git-diff-deleted {
-  background-color: #ef4444 !important;
-  width: 4px !important;
-  margin-left: 2px !important;
-}
-
-.git-diff-modified {
+.diff-gutter-modified {
   background-color: #3b82f6 !important;
-  width: 4px !important;
-  margin-left: 2px !important;
+  width: 3px !important;
+  margin-left: 3px !important;
+  border-radius: 1px !important;
 }
 
-/* Line background highlighting */
-.git-line-added {
-  background-color: rgba(34, 197, 94, 0.15) !important;
+.diff-gutter-deleted {
+  width: 0 !important;
+  height: 0 !important;
+  margin-left: 1px !important;
+  margin-top: -4px !important;
+  border-left: 5px solid transparent !important;
+  border-right: 5px solid transparent !important;
+  border-top: 6px solid #ef4444 !important;
+  background: transparent !important;
 }
 
-.git-line-deleted {
-  background-color: rgba(239, 68, 68, 0.15) !important;
+/* Markdown table styles for chat */
+.markdown-content table {
+  border-collapse: collapse;
+  margin: 0.75rem 0;
+  font-size: 0.875rem;
+  width: 100%;
 }
 
-/* Margin (line number area) highlighting */
-.git-margin-added {
-  background-color: rgba(34, 197, 94, 0.3) !important;
+.markdown-content th,
+.markdown-content td {
+  border: 1px solid #3f3f46;
+  padding: 0.5rem 0.75rem;
+  text-align: left;
 }
 
-.git-margin-deleted {
-  background-color: rgba(239, 68, 68, 0.3) !important;
+.markdown-content th {
+  background-color: #27272a;
+  font-weight: 600;
+}
+
+.markdown-content tr:nth-child(even) {
+  background-color: #18181b;
+}
+
+.markdown-content tr:hover {
+  background-color: #1f1f23;
+}
+
+/* Textarea resize handle styling */
+textarea.resize-y::-webkit-resizer {
+  background: linear-gradient(135deg, transparent 60%, #3f3f46 60%, #3f3f46 70%, transparent 70%),
+              linear-gradient(135deg, transparent 70%, #3f3f46 70%, #3f3f46 80%, transparent 80%),
+              linear-gradient(135deg, transparent 80%, #3f3f46 80%);
+  border-radius: 0 0 6px 0;
 }

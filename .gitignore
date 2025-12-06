@@ -37,3 +37,7 @@ pnpm-debug.log*
 
 # Test coverage
 coverage/
+
+# Internal development notes
+CLAUDE.internal.md
+RELEASE.md

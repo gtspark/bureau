@@ -7,6 +7,7 @@ import { getFileOperations } from './files/operations.js';
 import { getGitOperations } from './files/git.js';
 import { getPtyManager, shutdownPtyManager } from './terminal/pty.js';
 import { getSessionManager, shutdownSessionManager, Session } from './sessions/index.js';
+import { getCachedClaudeCliStatus, refreshClaudeCliStatus } from './claude/process.js';
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3006;
 const PROJECT_ROOT = process.env.PROJECT_ROOT || process.cwd();
@@ -26,6 +27,20 @@ app.get('/api/config', (_req, res) => {
     projectRoot: PROJECT_ROOT,
     port: PORT,
   });
+});
+
+// Claude CLI status endpoint
+app.get('/api/claude/status', (_req, res) => {
+  const status = getCachedClaudeCliStatus();
+  res.json(status);
+});
+
+// Refresh Claude CLI status (after user installs/authenticates)
+app.post('/api/claude/refresh', (_req, res) => {
+  const status = refreshClaudeCliStatus();
+  // Broadcast new status to all connected clients
+  broadcast({ type: 'claude:cli:status', ...status });
+  res.json(status);
 });
 
 const server = createServer(app);
@@ -162,11 +177,11 @@ function broadcast(message: object): void {
   });
 }
 
-// Forward session events to relevant clients
+// Forward Claude messages to ALL clients (they route by sessionId on frontend)
+// This allows background sessions to keep receiving messages when user switches away
 sessionManager.on('claude:message', ({ sessionId, message }: { sessionId: string; message: object }) => {
   wss.clients.forEach((client) => {
-    const clientSession = clientSessionMap.get(client);
-    if (clientSession === sessionId && client.readyState === WebSocket.OPEN) {
+    if (client.readyState === WebSocket.OPEN) {
       client.send(JSON.stringify({ type: 'claude:message', sessionId, message }));
     }
   });
@@ -469,15 +484,18 @@ wss.on('connection', async (ws: WebSocket) => {
 
         case 'file:save':
           try {
+            console.log(`[file:save] Saving: ${parsed.path}`);
             const clientFileOps = getClientFileOps(ws);
             // Record write to prevent watcher self-loop
             fileWatcher.recordWrite(parsed.path);
             await clientFileOps.writeFile(parsed.path, parsed.content);
+            console.log(`[file:save] Success: ${parsed.path}`);
             ws.send(JSON.stringify({
               type: 'file:saved',
               path: parsed.path,
             }));
           } catch (error) {
+            console.error(`[file:save] Error: ${parsed.path}`, error);
             ws.send(JSON.stringify({
               type: 'error',
               message: error instanceof Error ? error.message : 'Failed to save file',
@@ -727,6 +745,22 @@ wss.on('connection', async (ws: WebSocket) => {
           }
           break;
 
+        // Claude CLI status check/refresh
+        case 'claude:cli:status':
+          ws.send(JSON.stringify({
+            type: 'claude:cli:status',
+            ...getCachedClaudeCliStatus(),
+          }));
+          break;
+
+        case 'claude:cli:refresh':
+          const newStatus = refreshClaudeCliStatus();
+          ws.send(JSON.stringify({
+            type: 'claude:cli:status',
+            ...newStatus,
+          }));
+          break;
+
         default:
           ws.send(JSON.stringify({
             type: 'error',
@@ -757,12 +791,16 @@ wss.on('connection', async (ws: WebSocket) => {
   const sessionWithHistory = await sessionManager.getActiveSessionWithHistory();
   const isClaudeRunning = sessionManager.isClaudeRunning(activeSession.id);
 
-  // Send connection confirmation with session info
+  // Get Claude CLI status
+  const cliStatus = getCachedClaudeCliStatus();
+
+  // Send connection confirmation with session info and CLI status
   ws.send(JSON.stringify({
     type: 'connected',
     session: sessionWithHistory,
     claudeRunning: isClaudeRunning,
     sessions: sessionManager.listSessions(),
+    cliStatus,
   }));
 
   // Mark setup as complete and process any queued messages
@@ -794,6 +832,18 @@ server.listen(PORT, '0.0.0.0', async () => {
   console.log(`WebSocket available on ws://0.0.0.0:${PORT}/ws`);
   console.log(`Project root: ${PROJECT_ROOT}`);
 
+  // Check Claude CLI status at startup
+  const cliStatus = getCachedClaudeCliStatus();
+  if (cliStatus.installed && cliStatus.authenticated) {
+    console.log(`Claude CLI: v${cliStatus.version || 'unknown'} (authenticated)`);
+  } else if (cliStatus.installed && !cliStatus.authenticated) {
+    console.warn('Claude CLI: installed but NOT authenticated');
+    console.warn('Run "claude" in a terminal to authenticate');
+  } else {
+    console.warn('Claude CLI: NOT INSTALLED');
+    console.warn('Install with: npm install -g @anthropic-ai/claude-code');
+  }
+
   // Create default session if none exist and auto-spawn Claude
   let activeSession = sessionManager.getActiveSession();
   if (!activeSession) {
@@ -801,14 +851,16 @@ server.listen(PORT, '0.0.0.0', async () => {
     await sessionManager.switchSession(activeSession.id);
   }
 
-  // Auto-spawn Claude for active session
-  try {
-    if (!sessionManager.isClaudeRunning(activeSession.id)) {
-      sessionManager.spawnClaudeProcess(activeSession.id);
-      console.log('Claude process started for default session');
+  // Auto-spawn Claude for active session (only if CLI is ready)
+  if (cliStatus.installed && cliStatus.authenticated) {
+    try {
+      if (!sessionManager.isClaudeRunning(activeSession.id)) {
+        sessionManager.spawnClaudeProcess(activeSession.id);
+        console.log('Claude process started for default session');
+      }
+    } catch (error) {
+      console.error('Failed to spawn Claude:', error);
     }
-  } catch (error) {
-    console.error('Failed to spawn Claude:', error);
   }
 
   // Start file watcher

@@ -1,4 +1,4 @@
-import { useState, ReactNode } from 'react'
+import { useState, ReactNode, useCallback } from 'react'
 import { Files, GitBranch, Search, Settings, Box, RefreshCw, ChevronUp, ChevronRight } from 'lucide-react'
 import { cn } from '../lib/cn'
 
@@ -12,6 +12,7 @@ interface SidebarProps {
   projectRoot: string
   onExplorerSync: () => void
   onPathChange: (path: string) => void
+  onRefresh: () => void
 }
 
 interface ActivityIconProps {
@@ -49,11 +50,20 @@ function ActivityIcon({ icon, active, onClick, badge }: ActivityIconProps) {
   )
 }
 
-export function Sidebar({ fileTree, gitStatus, claudeCwd, explorerBasePath, projectRoot, onExplorerSync, onPathChange }: SidebarProps) {
+export function Sidebar({ fileTree, gitStatus, claudeCwd, explorerBasePath, projectRoot, onExplorerSync, onPathChange, onRefresh }: SidebarProps) {
   const [activeView, setActiveView] = useState<SidebarView>('explorer')
+  const [isRefreshing, setIsRefreshing] = useState(false)
 
-  // Check if sync is needed (cwd differs from current base path)
-  const syncAvailable = claudeCwd && claudeCwd !== explorerBasePath
+  const handleRefresh = useCallback(() => {
+    setIsRefreshing(true)
+    onRefresh()
+    // Reset after animation completes
+    setTimeout(() => setIsRefreshing(false), 500)
+  }, [onRefresh])
+
+  // Check if sync is available (cwd differs from current base path AND is within projectRoot)
+  const cwdInProject = claudeCwd && (claudeCwd === projectRoot || claudeCwd.startsWith(projectRoot + '/'))
+  const syncAvailable = cwdInProject && claudeCwd !== explorerBasePath
 
   // Get project folder name (basename of projectRoot)
   const projectName = projectRoot.split('/').filter(Boolean).pop() || 'Project'
@@ -187,6 +197,18 @@ export function Sidebar({ fileTree, gitStatus, claudeCwd, explorerBasePath, proj
                       title="Go up one directory"
                     >
                       <ChevronUp size={14} />
+                    </button>
+                    <button
+                      onClick={handleRefresh}
+                      className={cn(
+                        "flex items-center justify-center w-6 h-6 rounded border transition-all",
+                        isRefreshing
+                          ? "bg-blue-500/20 border-blue-500/30 text-blue-400 scale-95"
+                          : "bg-zinc-800/50 border-zinc-700/50 hover:bg-zinc-700/50 text-zinc-400 hover:text-zinc-200"
+                      )}
+                      title="Refresh file list"
+                    >
+                      <RefreshCw size={12} className={isRefreshing ? "animate-spin" : ""} />
                     </button>
                     {syncAvailable && (
                       <button

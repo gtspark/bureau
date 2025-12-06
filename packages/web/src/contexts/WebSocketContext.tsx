@@ -4,15 +4,25 @@ const WS_URL = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${win
 
 type MessageHandler = (msg: Record<string, unknown>) => void
 
+export interface ClaudeCliStatus {
+  installed: boolean
+  authenticated: boolean
+  version?: string
+  error?: string
+}
+
 interface WebSocketContextValue {
   connected: boolean
   claudeRunning: boolean
+  claudeModel: string | null
   claudeCwd: string | null
   lastExplorerPath: string | null
   lastTerminalCwd: string | null
   projectRoot: string | null
+  cliStatus: ClaudeCliStatus | null
   send: (message: object) => void
   subscribe: (handler: MessageHandler) => () => void
+  refreshCliStatus: () => void
 }
 
 const WebSocketContext = createContext<WebSocketContextValue | null>(null)
@@ -20,10 +30,12 @@ const WebSocketContext = createContext<WebSocketContextValue | null>(null)
 export function WebSocketProvider({ children }: { children: ReactNode }) {
   const [connected, setConnected] = useState(false)
   const [claudeRunning, setClaudeRunning] = useState(false)
+  const [claudeModel, setClaudeModel] = useState<string | null>(null)
   const [claudeCwd, setClaudeCwd] = useState<string | null>(null)
   const [lastExplorerPath, setLastExplorerPath] = useState<string | null>(null)
   const [lastTerminalCwd, setLastTerminalCwd] = useState<string | null>(null)
   const [projectRoot, setProjectRoot] = useState<string | null>(null)
+  const [cliStatus, setCliStatus] = useState<ClaudeCliStatus | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const handlersRef = useRef<Set<MessageHandler>>(new Set())
 
@@ -41,6 +53,11 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
       handlersRef.current.delete(handler)
     }
   }, [])
+
+  // Request CLI status refresh
+  const refreshCliStatus = useCallback(() => {
+    send({ type: 'claude:cli:refresh' })
+  }, [send])
 
   // Manage WebSocket connection
   useEffect(() => {
@@ -80,6 +97,10 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
           if (msg.type === 'connected') {
             // Initial connection includes Claude status and session info
             setClaudeRunning(!!msg.claudeRunning)
+            // Set CLI status from connection
+            if (msg.cliStatus) {
+              setCliStatus(msg.cliStatus as ClaudeCliStatus)
+            }
             // Set initial values from session
             const session = msg.session as {
               projectRoot?: string
@@ -93,6 +114,14 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
             }
             setLastExplorerPath(session?.lastExplorerPath || null)
             setLastTerminalCwd(session?.lastTerminalCwd || null)
+          } else if (msg.type === 'claude:cli:status') {
+            // CLI status update (after refresh)
+            setCliStatus({
+              installed: !!msg.installed,
+              authenticated: !!msg.authenticated,
+              version: msg.version as string | undefined,
+              error: msg.error as string | undefined,
+            })
           } else if (msg.type === 'sessions:switched') {
             // Session switch includes Claude status for new session
             setClaudeRunning(!!msg.claudeRunning)
@@ -116,10 +145,14 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
           } else if (msg.type === 'claude:message') {
             const m = msg.message as Record<string, unknown> | undefined
             if (m?.type === 'system') {
-              // Track cwd from system init message (initial project root)
-              if (m.subtype === 'init' && m.cwd) {
-                console.log('[WebSocket] initial cwd:', m.cwd)
-                setClaudeCwd(m.cwd as string)
+              // Track cwd and model from system init message
+              if (m.subtype === 'init') {
+                if (m.cwd) {
+                  setClaudeCwd(m.cwd as string)
+                }
+                if (m.model) {
+                  setClaudeModel(m.model as string)
+                }
                 setClaudeRunning(true)
               }
             }
@@ -173,7 +206,6 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
                         ? extractedPath.replace(/\/[^/]+$/, '')  // Get parent dir for files
                         : extractedPath.replace(/\/$/, '')       // Just trim trailing slash for dirs
                       if (dir && dir !== claudeCwd) {
-                        console.log('[WebSocket] cwd from tool path:', dir, '(from', extractedPath, ')')
                         setClaudeCwd(dir)
                       }
                     }
@@ -210,7 +242,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
   }, [])
 
   return (
-    <WebSocketContext.Provider value={{ connected, claudeRunning, claudeCwd, lastExplorerPath, lastTerminalCwd, projectRoot, send, subscribe }}>
+    <WebSocketContext.Provider value={{ connected, claudeRunning, claudeModel, claudeCwd, lastExplorerPath, lastTerminalCwd, projectRoot, cliStatus, send, subscribe, refreshCliStatus }}>
       {children}
     </WebSocketContext.Provider>
   )

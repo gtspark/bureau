@@ -7,7 +7,7 @@ Type=simple
 User=admin
 WorkingDirectory=/var/www/html/ide
 Environment=PATH=/usr/bin:/home/admin/.npm-global/bin
-ExecStart=/home/admin/.npm-global/bin/pnpm --filter @bureau-ide/web preview --port 5173 --host 0.0.0.0
+ExecStart=/home/admin/.npm-global/bin/pnpm --filter @bureau-ide/web preview --port 5175 --host 0.0.0.0
 Restart=always
 RestartSec=3
 

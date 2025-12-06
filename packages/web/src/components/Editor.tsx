@@ -11,12 +11,92 @@ interface OpenFile {
   path: string
   content: string
   isDirty?: boolean
+  originalContent?: string  // Clean content from disk (for diff computation)
 }
 
 interface LineDiff {
   added: number[]
   modified: number[]
   deleted: number[]
+}
+
+// Compute diff using a simple approach that matches git-style output
+// Returns: added (new lines), modified (changed lines), deleted (line numbers where deletions occurred)
+function computeLineDiff(original: string, current: string): LineDiff {
+  if (original === current) {
+    return { added: [], modified: [], deleted: [] }
+  }
+
+  const originalLines = original.split('\n')
+  const currentLines = current.split('\n')
+
+  const added: number[] = []
+  const modified: number[] = []
+  const deleted: number[] = []
+
+  // Use Myers-like approach: walk through both arrays tracking changes
+  const m = originalLines.length
+  const n = currentLines.length
+
+  // Build LCS for accurate tracking
+  const dp: number[][] = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0))
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      if (originalLines[i - 1] === currentLines[j - 1]) {
+        dp[i][j] = dp[i - 1][j - 1] + 1
+      } else {
+        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1])
+      }
+    }
+  }
+
+  // Backtrack to build edit script
+  const edits: Array<{ type: 'keep' | 'add' | 'del'; origLine?: number; currLine?: number }> = []
+  let i = m, j = n
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && originalLines[i - 1] === currentLines[j - 1]) {
+      edits.unshift({ type: 'keep', origLine: i, currLine: j })
+      i--
+      j--
+    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+      edits.unshift({ type: 'add', currLine: j })
+      j--
+    } else {
+      edits.unshift({ type: 'del', origLine: i })
+      i--
+    }
+  }
+
+  // Process edits to identify added, modified, deleted
+  // Modified = when a delete is immediately followed by an add (replacement)
+  for (let k = 0; k < edits.length; k++) {
+    const edit = edits[k]
+
+    if (edit.type === 'add') {
+      // Check if previous edit was a delete (this is a modification)
+      if (k > 0 && edits[k - 1].type === 'del') {
+        modified.push(edit.currLine!)
+      } else {
+        added.push(edit.currLine!)
+      }
+    } else if (edit.type === 'del') {
+      // Check if next edit is an add (will be marked as modified, so skip delete marker)
+      if (k + 1 < edits.length && edits[k + 1].type === 'add') {
+        // This delete is part of a modification, don't mark separately
+      } else {
+        // Pure deletion - mark at the current line position
+        // Find the current line position by looking at surrounding context
+        const nextKeepOrAdd = edits.slice(k + 1).find(e => e.type === 'keep' || e.type === 'add')
+        if (nextKeepOrAdd?.currLine) {
+          deleted.push(nextKeepOrAdd.currLine)
+        } else if (n > 0) {
+          deleted.push(n) // deletion at end of file
+        }
+      }
+    }
+  }
+
+  return { added, modified, deleted }
 }
 
 interface EditorProps {
@@ -26,6 +106,7 @@ interface EditorProps {
   onContentChange?: (path: string, content: string) => void
   onClose?: (index: number) => void
   onFileDrop?: (path: string) => void
+  onSave?: (path: string) => void
 }
 
 // Detect language from file extension
@@ -64,7 +145,7 @@ function getLanguage(path: string): string {
   return languageMap[ext || ''] || 'plaintext'
 }
 
-export function Editor({ files, activeIndex, onTabClick, onContentChange, onClose, onFileDrop }: EditorProps) {
+export function Editor({ files, activeIndex, onTabClick, onContentChange, onClose, onFileDrop, onSave }: EditorProps) {
   const [isSaving, setIsSaving] = useState(false)
   const [externalChange, setExternalChange] = useState<string | null>(null)
   const [isDragOver, setIsDragOver] = useState(false)
@@ -84,17 +165,25 @@ export function Editor({ files, activeIndex, onTabClick, onContentChange, onClos
   const content = activeFile?.content || ''
   const isDirty = activeFile?.isDirty || false
 
-  // Update refs when active file changes and request line diff
+  // Update refs when active file changes
   useEffect(() => {
     currentPathRef.current = path
-    originalContentRef.current = content
+    // Use originalContent if available (for dirty files restored from session), otherwise current content
+    originalContentRef.current = activeFile?.originalContent ?? content
     setExternalChange(null)
     setLineDiff(null)
+  }, [path]) // Only reset when path changes, not content
 
-    // Request line diff for git highlighting
-    if (path && wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: 'git:linediff', path }))
-    }
+  // Compute local diff when content changes (debounced)
+  useEffect(() => {
+    if (!path || !content) return
+
+    const timer = setTimeout(() => {
+      const diff = computeLineDiff(originalContentRef.current, content)
+      setLineDiff(diff)
+    }, 150) // Debounce to avoid excessive computation while typing
+
+    return () => clearTimeout(timer)
   }, [path, content])
 
   // WebSocket connection for saving and external changes
@@ -123,7 +212,12 @@ export function Editor({ files, activeIndex, onTabClick, onContentChange, onClos
             case 'file:saved':
               if (msg.path === currentPathRef.current) {
                 setIsSaving(false)
+                // After save, the current content becomes the new original
                 originalContentRef.current = editorRef.current?.getValue() || ''
+                // Recompute diff immediately (will be empty since original=current)
+                setLineDiff({ added: [], modified: [], deleted: [] })
+                // Notify parent that file was saved (clears isDirty)
+                onSave?.(msg.path)
               }
               break
 
@@ -144,16 +238,6 @@ export function Editor({ files, activeIndex, onTabClick, onContentChange, onClos
                     }
                   }
                 }
-              }
-              break
-
-            case 'git:linediff':
-              if (msg.path === currentPathRef.current) {
-                setLineDiff({
-                  added: msg.added as number[] || [],
-                  modified: msg.modified as number[] || [],
-                  deleted: msg.deleted as number[] || [],
-                })
               }
               break
 
@@ -182,7 +266,7 @@ export function Editor({ files, activeIndex, onTabClick, onContentChange, onClos
     }
   }, [isDirty, onContentChange])
 
-  // Apply git diff decorations
+  // Apply diff decorations
   useEffect(() => {
     if (!editorRef.current || !monacoRef.current || !lineDiff) return
 
@@ -191,35 +275,46 @@ export function Editor({ files, activeIndex, onTabClick, onContentChange, onClos
 
     const decorations: editor.IModelDeltaDecoration[] = []
 
-    // Added lines - green
+    // Added lines - green gutter bar
     for (const line of lineDiff.added) {
       decorations.push({
         range: new monaco.Range(line, 1, line, 1),
         options: {
           isWholeLine: true,
-          className: 'git-line-added',
-          linesDecorationsClassName: 'git-diff-added',
-          marginClassName: 'git-margin-added',
+          linesDecorationsClassName: 'diff-gutter-added',
           overviewRuler: {
             color: '#22c55e',
-            position: monaco.editor.OverviewRulerLane.Full,
+            position: monaco.editor.OverviewRulerLane.Left,
           },
         },
       })
     }
 
-    // Deleted lines - red marker at position
-    for (const line of lineDiff.deleted) {
+    // Modified lines - blue gutter bar
+    for (const line of lineDiff.modified) {
       decorations.push({
         range: new monaco.Range(line, 1, line, 1),
         options: {
           isWholeLine: true,
-          className: 'git-line-deleted',
-          linesDecorationsClassName: 'git-diff-deleted',
-          marginClassName: 'git-margin-deleted',
+          linesDecorationsClassName: 'diff-gutter-modified',
+          overviewRuler: {
+            color: '#3b82f6',
+            position: monaco.editor.OverviewRulerLane.Left,
+          },
+        },
+      })
+    }
+
+    // Deleted lines - red triangle marker
+    for (const line of lineDiff.deleted) {
+      decorations.push({
+        range: new monaco.Range(line, 1, line, 1),
+        options: {
+          isWholeLine: false,
+          linesDecorationsClassName: 'diff-gutter-deleted',
           overviewRuler: {
             color: '#ef4444',
-            position: monaco.editor.OverviewRulerLane.Full,
+            position: monaco.editor.OverviewRulerLane.Left,
           },
         },
       })
@@ -229,7 +324,9 @@ export function Editor({ files, activeIndex, onTabClick, onContentChange, onClos
     decorationsRef.current = editor.deltaDecorations(decorationsRef.current, decorations)
   }, [lineDiff])
 
-  // Save file
+  // Save file - use ref to avoid stale closure in Monaco command
+  const saveFileRef = useRef<() => void>(() => {})
+
   const saveFile = useCallback(() => {
     if (!path || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return
     if (!isDirty) return
@@ -244,10 +341,25 @@ export function Editor({ files, activeIndex, onTabClick, onContentChange, onClos
     }))
   }, [path, isDirty])
 
+  // Keep ref in sync
+  useEffect(() => {
+    saveFileRef.current = saveFile
+  }, [saveFile])
+
   // Handle editor mount
   const handleEditorMount: OnMount = (editor, monaco) => {
     editorRef.current = editor
     monacoRef.current = monaco
+
+    // Disable TypeScript/JavaScript diagnostics (red squiggles)
+    monaco.languages.typescript.typescriptDefaults.setDiagnosticsOptions({
+      noSemanticValidation: true,
+      noSyntaxValidation: true,
+    })
+    monaco.languages.typescript.javascriptDefaults.setDiagnosticsOptions({
+      noSemanticValidation: true,
+      noSyntaxValidation: true,
+    })
 
     // Define custom dark theme matching app colors
     monaco.editor.defineTheme('bureau-dark', {
@@ -275,11 +387,8 @@ export function Editor({ files, activeIndex, onTabClick, onContentChange, onClos
 
     // Set up keyboard shortcut for save (Cmd/Ctrl+S)
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-      saveFile()
+      saveFileRef.current()
     })
-
-    // Focus the editor
-    editor.focus()
   }
 
   // Handle content change
@@ -420,8 +529,14 @@ export function Editor({ files, activeIndex, onTabClick, onContentChange, onClos
               <div
                 key={file.path}
                 onClick={() => onTabClick?.(index)}
-                onAuxClick={(e) => {
-                  // Middle-click to close
+                onMouseDown={(e) => {
+                  // Prevent middle-click from triggering horizontal scroll
+                  if (e.button === 1) {
+                    e.preventDefault()
+                  }
+                }}
+                onMouseUp={(e) => {
+                  // Middle-click to close (use mouseup so preventDefault works)
                   if (e.button === 1) {
                     e.preventDefault()
                     handleClose(index)
@@ -532,6 +647,8 @@ export function Editor({ files, activeIndex, onTabClick, onContentChange, onClos
             smoothScrolling: true,
             cursorBlinking: 'smooth',
             cursorSmoothCaretAnimation: 'on',
+            // Disable validation squiggles - we don't have full project context
+            'semanticHighlighting.enabled': false,
           }}
         />
       </div>

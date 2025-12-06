@@ -236,19 +236,70 @@ export class GitOperations {
   }
 
   /**
+   * Check if a remote exists
+   */
+  async hasRemote(remote: string = 'origin'): Promise<boolean> {
+    try {
+      const remotes = await this.git.getRemotes();
+      return remotes.some(r => r.name === remote);
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Push to remote
    */
   async push(remote: string = 'origin', branch?: string): Promise<void> {
+    // Check if remote exists first
+    const hasRemote = await this.hasRemote(remote);
+    if (!hasRemote) {
+      throw new Error(`No remote '${remote}' configured. Add one with: git remote add ${remote} <url>`);
+    }
+
     const currentBranch = branch || await this.getCurrentBranch();
-    await this.git.push(remote, currentBranch);
+    try {
+      await this.git.push(remote, currentBranch);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      // Make common errors more user-friendly
+      if (message.includes('Could not read from remote repository')) {
+        throw new Error(`Cannot connect to remote '${remote}'. Check your SSH keys or repository URL.`);
+      }
+      if (message.includes('rejected') && message.includes('non-fast-forward')) {
+        throw new Error(`Push rejected: remote has changes you don't have. Pull first, then push.`);
+      }
+      throw err;
+    }
   }
 
   /**
    * Pull from remote
    */
   async pull(remote: string = 'origin', branch?: string): Promise<void> {
+    // Check if remote exists first
+    const hasRemote = await this.hasRemote(remote);
+    if (!hasRemote) {
+      throw new Error(`No remote '${remote}' configured. Add one with: git remote add ${remote} <url>`);
+    }
+
     const currentBranch = branch || await this.getCurrentBranch();
-    await this.git.pull(remote, currentBranch);
+    try {
+      await this.git.pull(remote, currentBranch);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      // Make common errors more user-friendly
+      if (message.includes('Could not read from remote repository')) {
+        throw new Error(`Cannot connect to remote '${remote}'. Check your SSH keys or repository URL.`);
+      }
+      if (message.includes('CONFLICT')) {
+        throw new Error(`Pull failed: merge conflicts detected. Resolve conflicts manually.`);
+      }
+      if (message.includes('local changes')) {
+        throw new Error(`Pull failed: you have uncommitted changes. Commit or stash them first.`);
+      }
+      throw err;
+    }
   }
 }
 
