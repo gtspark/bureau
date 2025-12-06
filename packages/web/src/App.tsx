@@ -9,6 +9,7 @@ import { Editor } from './components/Editor'
 import { GitStatus } from './components/GitStatus'
 import { Terminal, TerminalRef } from './components/Terminal'
 import { Sidebar } from './components/Sidebar'
+import { SecurityWarningModal } from './components/SecurityWarningModal'
 
 interface OpenFile {
   path: string
@@ -364,13 +365,16 @@ function AppContent() {
   const terminal = <Terminal ref={terminalRef} />
 
   return (
-    <Layout
-      sidebar={sidebar}
-      editor={editor}
-      chat={chat}
-      terminal={terminal}
-      claudeStatus={claudeStatus}
-    />
+    <>
+      <SecurityWarningModal />
+      <Layout
+        sidebar={sidebar}
+        editor={editor}
+        chat={chat}
+        terminal={terminal}
+        claudeStatus={claudeStatus}
+      />
+    </>
   )
 }
 

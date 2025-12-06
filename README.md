@@ -17,7 +17,11 @@ A web-based IDE frontend for Claude Code CLI. Get a VS Code-like experience whil
 
 ## Security Warning
 
-> **Warning**: Bureau spawns shell processes and has full filesystem access within its project root. Run it only on your own machine or a trusted network. **Do not expose to the public internet.**
+> **Warning**: Bureau runs Claude Code with `--dangerously-skip-permissions`. All file operations, shell commands, and code execution are automatically approved. This is intentional - a web UI cannot handle interactive permission prompts.
+
+**Only run Bureau on machines and projects where you trust Claude to make changes without confirmation.**
+
+Bureau also spawns shell processes and has full filesystem access within its project root. Run it only on your own machine or a trusted network. **Do not expose to the public internet.**
 
 Bureau is designed for local development, not as a hosted service.
 

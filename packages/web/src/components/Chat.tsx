@@ -12,6 +12,14 @@ marked.setOptions({
   breaks: true,
 })
 
+// Custom renderer to open links in new tab
+const renderer = new marked.Renderer()
+renderer.link = ({ href, title, text }) => {
+  const titleAttr = title ? ` title="${title}"` : ''
+  return `<a href="${href}"${titleAttr} target="_blank" rel="noopener noreferrer">${text}</a>`
+}
+marked.use({ renderer })
+
 // Prefix used when context refresh is prepended to messages after compaction
 const CONTEXT_REFRESH_PREFIX = '[CONTEXT:'
 
@@ -242,13 +250,13 @@ export function Chat({ onClose, onSwitchToOutput }: ChatProps) {
               if (thinkingContent && isActiveSession) {
                 const id = `thinking-${Date.now()}`
                 setThinking({ id, content: thinkingContent, isActive: true, isExpanded: true, startTime: Date.now() })
-                setIsWaiting(false)
+                // Don't clear isWaiting - keep it true until result comes
               }
 
               // If we have new tools, add them - only for active session
               if (newTools.length > 0 && isActiveSession) {
                 updateToolActivities(prev => [...prev, ...newTools])
-                setIsWaiting(false)
+                // Don't clear isWaiting - keep it true until result comes
                 setIsProcessing(false)
               }
 
@@ -266,7 +274,7 @@ export function Chat({ onClose, onSwitchToOutput }: ChatProps) {
                 // Clear tools after attaching to message - only for active session
                 if (isActiveSession) {
                   updateToolActivities(() => [])
-                  setIsWaiting(false)
+                  // Don't clear isWaiting here - only clear on 'result' message
                   setIsProcessing(false)
                   setThinking(null)
                 }
@@ -332,8 +340,18 @@ export function Chat({ onClose, onSwitchToOutput }: ChatProps) {
         if (msg.sessionId === activeSessionId) {
           setThinking(null)
           updateToolActivities(() => [])
-          setIsWaiting(false)
           setIsCompacting(false)
+
+          // Process queued messages if any
+          if (messageQueueRef.current.length > 0) {
+            const [nextMessage, ...rest] = messageQueueRef.current
+            setMessageQueue(rest)
+            setTimeout(() => {
+              doSendMessageRef.current(nextMessage)
+            }, 100)
+          } else {
+            setIsWaiting(false)
+          }
         }
         break
 
